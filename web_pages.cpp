@@ -362,44 +362,80 @@ const char SENSORS_PAGE[] PROGMEM = R"rawliteral(
     </div>
 
     <script>
-        function loadSensors() {
-            fetch('/api/sensors')
-                .then(response => response.json())
-                .then(sensors => {
-                    const list = document.getElementById('sensorsList');
-                    list.innerHTML = '';
-                    
-                    sensors.forEach(sensor => {
-                        const item = document.createElement('div');
-                        item.className = 'sensor-item';
-                        item.innerHTML = `
-                            <div class='sensor-header'>
-                                <span class='sensor-name'>${sensor.name}</span>
-                                <label class='sensor-toggle'>
-                                    <input type='checkbox' ${sensor.enabled ? 'checked' : ''} onchange='toggleSensor(${sensor.id}, this.checked)'>
-                                    <span class='slider'></span>
-                                </label>
-                            </div>
-                            <div class='sensor-value'>${sensor.currentValue} ${sensor.unit}</div>
-                            <div class='sensor-range'>Диапазон: ${sensor.minValue} – ${sensor.maxValue} ${sensor.unit}</div>
-                            <div class='sensor-controls'>
-                                <button class='btn btn-edit' onclick='editSensor(${sensor.id})'>✏️ Редактировать</button>
-                                <button class='btn btn-delete' onclick='deleteSensor(${sensor.id})'>🗑️ Удалить</button>
-                            </div>
-                        `;
-                        list.appendChild(item);
-                    });
-                })
-                .catch(console.error);
-        }
+        let autoRefresh = true; // Флаг автообновления
 
-        function toggleSensor(id, enabled) {
-            fetch('/api/sensors/' + id + '/toggle', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({enabled: enabled})
-            }).then(loadSensors);
+function loadSensors() {
+    if (!autoRefresh) return; // Не обновлять если пользователь взаимодействует
+    
+    fetch('/api/sensors')
+        .then(response => response.json())
+        .then(sensors => {
+            const list = document.getElementById('sensorsList');
+            list.innerHTML = '';
+            
+            sensors.forEach(sensor => {
+                const item = document.createElement('div');
+                item.className = 'sensor-item';
+                item.innerHTML = `
+                    <div class='sensor-header'>
+                        <span class='sensor-name'>${sensor.name}</span>
+                        <label class='sensor-toggle'>
+                            <input type='checkbox' ${sensor.enabled ? 'checked' : ''} onchange='toggleSensor(${sensor.id}, this.checked)'>
+                            <span class='slider'></span>
+                        </label>
+                    </div>
+                    <div class='sensor-value'>${sensor.currentValue} ${sensor.unit}</div>
+                    <div class='sensor-range'>Диапазон: ${sensor.minValue} – ${sensor.maxValue} ${sensor.unit}</div>
+                    <div class='sensor-controls'>
+                        <button class='btn btn-edit' onclick='editSensor(${sensor.id})'>✏️ Редактировать</button>
+                        <button class='btn btn-delete' onclick='deleteSensor(${sensor.id})'>🗑️ Удалить</button>
+                    </div>
+                `;
+                list.appendChild(item);
+            });
+        })
+        .catch(console.error);
+}
+
+function toggleSensor(id, enabled) {
+    // Отключаем автообновление на 5 секунд
+    autoRefresh = false;
+    setTimeout(() => { autoRefresh = true; }, 5000);
+    
+    fetch('/api/sensors/' + id + '/toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled: enabled})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Успешно - ничего не делаем, автообновление само всё обновит
+        } else {
+            // Ошибка - восстанавливаем состояние через 1 секунду
+            setTimeout(() => {
+                const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+                checkboxes.forEach(cb => {
+                    if (cb.onchange.toString().includes(id.toString())) {
+                        cb.checked = !enabled;
+                    }
+                });
+            }, 1000);
         }
+    })
+    .catch(error => {
+        console.error('Ошибка:', error);
+        // Восстанавливаем состояние при ошибке сети
+        setTimeout(() => {
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                if (cb.onchange.toString().includes(id.toString())) {
+                    cb.checked = !enabled;
+                }
+            });
+        }, 1000);
+    });
+}
 
         function deleteSensor(id) {
             if (confirm('Удалить датчик?')) {
@@ -438,8 +474,10 @@ const char SENSORS_PAGE[] PROGMEM = R"rawliteral(
             alert('Редактирование пока недоступно. Удалите и создайте заново.');
         }
 
-        document.addEventListener('DOMContentLoaded', loadSensors);
-        setInterval(loadSensors, 3000);
+        document.addEventListener('DOMContentLoaded', function() {
+    loadSensors();
+    setInterval(loadSensors, 3000);
+});
     </script>
 </body>
 </html>
